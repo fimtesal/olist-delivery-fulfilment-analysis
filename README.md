@@ -1,198 +1,69 @@
-# olist-delivery-fulfilment-analysis
-SQL analysis of delivery delay: seller vs. courier bottleneck diagnosis (Olist dataset)
-# Milestone 1 Report
-## E-Commerce Fulfilment Bottleneck & Delivery Performance Analysis
+# Seller vs. Courier: Diagnosing Delivery Delay in a Brazilian E-Commerce Marketplace
 
 **Team:** Atikaa Abbas · Imtesal Fatima · Maria Noor
 **Dataset:** Brazilian E-Commerce Public Dataset by Olist (Kaggle)
 **Tool Used:** SQLite
-**Submission Date:** September 6, 2026
+**Track:** AuratTech Data Analyst Track
 
 ---
 
-## 1. Executive Summary
+## Project Summary
 
-This project analyzes approximately 99,000 real, anonymized e-commerce orders from Olist, a Brazilian online marketplace, to determine where delivery time is actually being spent — with the seller during order preparation, or with the carrier during transit. After cleaning and validating the dataset, 96,281 delivered orders were analyzed to separate total fulfilment time into a pre-shipment (seller) stage and a post-shipment (carrier) stage.
+When a delivery is late, it could be the seller's fault (slow to prepare and ship the order) or the courier's fault (slow to deliver it once shipped) — and each requires a completely different operational response. This project analyzes ~99,000 real, anonymized orders from Olist to diagnose where fulfilment delay actually originates: seller processing time or courier transit time. Milestone 1 established the regional pattern; Milestone 2 dug deeper into individual sellers, product categories, and customer reviews.
 
-The analysis finds that carrier transit time (9.3 days on average) is roughly three times longer than seller processing time (3.2 days), meaning approximately 75% of total fulfilment time occurs after the order has already left the seller. This pattern holds consistently across nearly all Brazilian states — seller performance is stable nationwide (2.8–3.7 days), while carrier performance varies dramatically, with several North-region states (RR, AP, AM, AL, PA) experiencing average transit times exceeding three weeks.
-
-These findings indicate that delivery delay in this dataset is overwhelmingly a logistics and carrier-side issue rather than a seller-processing issue, and that any operational response to delivery complaints should be directed accordingly — particularly given that revenue is heavily concentrated in São Paulo (~42% of the total), making fulfilment reliability in high-volume regions especially consequential.
+**Headline finding:** Courier transit time (9.3 days average) is roughly 3x longer than seller processing time (3.2 days) — meaning ~75% of total delivery time occurs after the order leaves the seller. This pattern holds at the order level too: courier delay is the bigger factor in 82.1% of all orders.
 
 ---
 
-## 2. Problem Statement
+# Milestone 1 — Regional Delivery Performance Baseline
 
-An e-commerce marketplace wants to understand where time is being spent across the order-fulfilment process. This project separates fulfilment time into pre-shipment processing time and post-shipment delivery time, compares these components across sellers and regions, and identifies patterns where delays or unusually long processing times are concentrated. The purpose is to highlight areas that may warrant further operational investigation.
+## Problem Statement
 
-**Main Analytical Question:** Is delay in the order-fulfilment process more attributable to the pre-shipment (seller-side) stage or the post-shipment (carrier/delivery) stage, and does this differ by region?
+An e-commerce marketplace wants to understand where time is being spent across the order-fulfilment process. This project separates fulfilment time into pre-shipment processing time and post-shipment delivery time, compares these components across sellers and regions, and identifies patterns where delays are concentrated.
 
-**Supporting Questions:**
-- What is the average total fulfilment time, and how much of it is pre-shipment vs. post-shipment time?
-- How does this split vary across states?
-- Which states show the largest pre-shipment (seller-side) delay?
-- Which states show the largest post-shipment (carrier-side) delay?
-- How does delivered revenue vary by state, and does it relate to fulfilment performance?
-- What percentage of orders are late relative to Olist's own estimated delivery date?
+**Main Question:** Is delay in the order-fulfilment process more attributable to the pre-shipment (seller-side) stage or the post-shipment (courier/delivery) stage, and does this differ by region?
 
----
+## Dataset & Methodology
 
-## 3. Dataset & Methodology
+**Tables:** `orders`, `order_items`, `customers` (96,281 orders after cleaning)
 
-**Source:** Brazilian E-Commerce Public Dataset by Olist, Kaggle. Anonymized, licensed for reuse and analysis.
-**Tables used:** `orders`, `order_items`, `customers`
-
-**Raw Row Counts:**
-
-| Table | Row Count |
+**Metric Definitions:**
+| Metric | Formula |
 |---|---|
-| orders | 99,441 |
-| order_items | 112,650 |
-| customers | 99,441 |
+| Pre-shipment processing time | carrier_date − purchase_timestamp |
+| Post-shipment delivery time | delivered_date − carrier_date |
+| Total fulfilment time | delivered_date − purchase_timestamp |
 
-### 3.1 Metric Definitions
+**Data-Handling Rules:**
+- Only `order_status = 'delivered'` orders included in delivery-time calculations
+- Orders with missing/invalid dates excluded from calculations (not deleted from source)
+- Revenue uses `SUM(price)`; order counts use `COUNT(DISTINCT order_id)` to avoid double-counting
+- "On-time" is a supporting metric only, since Olist's estimated dates include a distance buffer
 
-| Metric | Formula | Represents |
-|---|---|---|
-| Pre-shipment processing time | carrier_date − purchase_timestamp | How long the seller took to hand the order to the carrier |
-| Post-shipment delivery time | delivered_date − carrier_date | How long the carrier took to deliver the order |
-| Total fulfilment time | delivered_date − purchase_timestamp | The full time experienced by the customer |
-
-### 3.2 Data-Handling Rules
-
-- Only orders with `order_status = 'delivered'` are included in delivery-time calculations, since other statuses lack complete date fields.
-- Orders with missing carrier-handoff or customer-delivery dates are excluded from calculations, not deleted from the source table.
-- Revenue is calculated using `SUM(price)` at the item level; order counts use `COUNT(DISTINCT order_id)` to avoid double-counting orders with multiple items.
-- "On-time" is defined as `delivered_date <= estimated_delivery_date`. This is a supporting metric only, since Olist's estimated delivery dates include a built-in buffer (demonstrated in Section 7.2).
-
----
-
-## 4. Data Cleaning & Quality Assurance
-
-### 4.1 Order Status Breakdown
-
-```sql
-SELECT order_status, COUNT(*)
-FROM orders
-GROUP BY order_status
-ORDER BY COUNT(*) DESC;
-```
-
-| Status | Count |
-|---|---|
-| delivered | 96,478 |
-| shipped | 1,107 |
-| canceled | 625 |
-| unavailable | 609 |
-| invoiced | 314 |
-| processing | 301 |
-| created | 5 |
-| approved | 2 |
-
-**Interpretation:** ~97.0% of orders reached "delivered" status. Only delivered orders were used for delivery-time analysis, since other statuses lack the timestamps needed for calculation.
-
-### 4.2 Missing Values Check
-
-```sql
-SELECT
-    SUM(CASE WHEN order_delivered_carrier_date IS NULL OR order_delivered_carrier_date = '' THEN 1 ELSE 0 END) AS missing_carrier_date,
-    SUM(CASE WHEN order_delivered_customer_date IS NULL OR order_delivered_customer_date = '' THEN 1 ELSE 0 END) AS missing_delivered_date
-FROM orders;
-```
-
-| missing_carrier_date | missing_delivered_date |
-|---|---|
-| 1,783 | 2,965 |
-
-**Interpretation:** About 2% to 3% of orders didn't have delivery times, probably because they were never delivered. We didn't include them in our time calculations.
-
-### 4.3 Date Range and Integrity Checks
-
-```sql
-SELECT MIN(order_purchase_timestamp), MAX(order_purchase_timestamp) FROM orders;
-```
-**Result:** matches the documented dataset range (2016–2018)
-
-```sql
-SELECT COUNT(*) FROM orders 
-WHERE order_status = 'delivered' 
-  AND order_delivered_carrier_date != ''
-  AND order_delivered_carrier_date < order_purchase_timestamp;
-
-SELECT COUNT(*) FROM orders 
-WHERE order_status = 'delivered' 
-  AND order_delivered_customer_date != ''
-  AND order_delivered_customer_date < order_delivered_carrier_date;
-```
-**Result:** 165 and 23
-
-**Interpretation:** We found 188 invalid orders during a detailed check: 165 had handoff dates before the purchase date, and 23 had delivery dates before the handoff date. Since these timelines are logically impossible, we removed them as data errors to make our dataset cleaner.
-
-### 4.4 Table Integrity Checks (order_items, customers)
+## Data Cleaning Summary
 
 | Check | Result |
 |---|---|
-| Missing price values | 0 |
-| Missing seller_id values | 0 |
-| Invalid (≤0) prices | 0 |
-| order_items rows with no matching order | 0 |
-| Duplicate customer_id values | 0 |
-| Orders with no matching customer record | 0 |
+| Total raw orders | 99,441 |
+| Delivered-status orders | 96,478 |
+| Missing carrier/delivery dates | 1,783 / 2,965 |
+| Invalid date-sequence orders excluded | 188 (165 + 23) |
+| Final clean dataset | 96,281 |
+| order_items / customers integrity issues | 0 |
 
-**Interpretation:** `order_items` and `customers` required no exclusions — both tables were fully clean on import.
+## Key Results — Overall Metrics
 
-### 4.5 Final Clean Dataset
+| Metric | Value |
+|---|---|
+| Average total fulfilment time | 12.6 days |
+| Average pre-shipment (seller) time | **3.2 days** |
+| Average post-shipment (courier) time | **9.3 days** |
 
-```sql
-CREATE VIEW clean_orders AS
-SELECT *
-FROM orders
-WHERE order_status = 'delivered'
-  AND order_delivered_carrier_date IS NOT NULL AND order_delivered_carrier_date != ''
-  AND order_delivered_customer_date IS NOT NULL AND order_delivered_customer_date != ''
-  AND order_delivered_customer_date >= order_purchase_timestamp
-  AND order_delivered_carrier_date >= order_purchase_timestamp
-  AND order_delivered_customer_date >= order_delivered_carrier_date;
+## Key Results — Regional Patterns
 
-SELECT COUNT(*) FROM clean_orders;
-```
-**Result:** 96,281 orders remain in the final clean dataset (96,478 delivered orders, minus 197 excluded for missing or logically invalid dates).
+**Top 5 states by courier (post-shipment) time:**
 
----
-
-## 5. Analysis — Overall Fulfilment Metrics
-
-```sql
-SELECT
-    COUNT(*) AS total_delivered_orders,
-    ROUND(AVG(JULIANDAY(order_delivered_customer_date) - JULIANDAY(order_purchase_timestamp)), 1) AS avg_total_days,
-    ROUND(AVG(JULIANDAY(order_delivered_carrier_date) - JULIANDAY(order_purchase_timestamp)), 1) AS avg_pre_shipment_days,
-    ROUND(AVG(JULIANDAY(order_delivered_customer_date) - JULIANDAY(order_delivered_carrier_date)), 1) AS avg_post_shipment_days
-FROM clean_orders;
-```
-
-| total_delivered_orders | avg_total_days | avg_pre_shipment_days | avg_post_shipment_days |
-|---|---|---|---|
-| 96,281 | 12.6 | 3.2 | 9.3 |
-
-**Interpretation:** On average, an order takes 12.6 days from purchase to delivery. Of this, only 3.2 days (25%) are spent on the seller side preparing and handing off the order; the remaining 9.3 days (75%) are spent in carrier transit. This is the project's central finding: the majority of fulfilment time is consumed after the order leaves the seller.
-
-**Min/Max (Outlier Check):**
-
-| min_pre_shipment | max_pre_shipment | min_post_shipment | max_post_shipment |
-|---|---|---|---|
-| ~0.0004 | 125.8 | 0 | 205.2 |
-
-**Interpretation:** While typical values are low, a small number of extreme outliers exist (up to ~126 days pre-shipment, ~205 days post-shipment). These were retained in the average since no evidence indicates they are data errors, but they are noted here for transparency.
-
----
-
-## 6. Analysis — Regional Fulfilment Patterns
-
-### 6.1 Pre-Shipment vs. Post-Shipment Time by State
-
-**Top 5 states by post-shipment (courier) time:**
-
-| State | Orders | Pre-shipment (days) | Post-shipment (days) |
+| State | Orders | Seller Time | Courier Time |
 |---|---|---|---|
 | RR | 41 | 3.7 | 25.6 |
 | AP | 67 | 3.5 | 23.7 |
@@ -200,101 +71,123 @@ FROM clean_orders;
 | AL | 397 | 3.5 | 21.1 |
 | PA | 945 | 3.5 | 20.3 |
 
-**Top 5 states by pre-shipment (seller) time:**
+Seller time stays within 2.8–3.7 days nationwide; courier time varies from near-zero to 25.6 days, concentrated in North-region states. Every top-affected state classifies as `courier_side_larger`.
 
-| State | Orders | Pre-shipment (days) | Post-shipment (days) |
+## Key Results — Revenue & On-Time Delivery
+
+- São Paulo (SP) generates ~42% of total delivered revenue (R$5.06M, 40,427 orders)
+- Highest late-delivery-rate states: AL (23.9%), MA (19.7%), PI (16.1%)
+- Roraima (RR) had the *worst raw courier time* (25.6 days) but only a 12.2% late rate — because Olist's estimate already buffers for distance. Raw time metrics are more reliable than "on-time %" for identifying real delay.
+
+## Milestone 1 Consolidated Findings
+
+1. Fulfilment delay is overwhelmingly a carrier/logistics issue, not a seller-processing issue — 75% of total time occurs after the order leaves the seller.
+2. Seller performance is consistent nationwide; carrier performance is not, with North-region states most affected.
+3. Revenue is heavily concentrated in São Paulo, making its fulfilment performance disproportionately important.
+4. The on-time/late metric alone can be misleading in remote regions — raw post-shipment time is the more honest measure.
+
+## Milestone 1 Limitations
+
+- Historical (2016–2018) data; no live business impact — a demonstration of method, not a live diagnostic
+- 188 orders (~0.2%) excluded for invalid date sequences
+- Extreme outliers (up to ~205 days) retained in averages
+- Shows patterns/associations, not root causes
+
+---
+
+# Milestone 2 — Seller, Category & Review-Level Analysis
+
+## Problem Statement (Extended)
+
+Milestone 1 established that courier delay dominates seller delay and is regionally concentrated. Milestone 2 extends this to a finer level: which individual sellers and product categories drive delay, and whether it's associated with customer satisfaction.
+
+**Main Question:** Which individual sellers and product-category segments show the largest fulfilment delay, and is that delay more associated with seller processing time or courier transit time?
+
+## New Tables Added
+
+`sellers`, `products`, `product_category_name_translation`, `order_reviews` — all joined to the same `clean_orders` view (96,281 orders) established in Milestone 1. Integrity checks found 0 issues in `sellers`/`products`; 645 orders (~0.7%) had no matching review, which is expected since reviews are optional.
+
+## Key Results — Seller-Level Analysis
+
+The slowest individual seller averages **26.2 days** for pre-shipment (vs. 3.2-day platform average) across 12 orders — over 8x the norm. The top 10 slowest sellers (minimum 10 orders each) cluster between 12.4–26.2 days, showing seller-side delay is driven by a **small group of sellers**, not the broader seller base.
+
+## Key Results — Seller-State vs. Customer-State
+
+Every one of the 10 worst seller-to-customer combinations involves a South/Southeast seller (SP, PR, RJ, MG, SC) shipping to a North/Northeast customer (RR, AL, AP, RO, PA, AM, CE, PB) — e.g., SP→RR averages 26.4 days, PR→AL averages 26.3 days. Even sellers from major hubs take this long on these routes, confirming the delay is **route/distance-based, not seller-quality-based**.
+
+## Key Results — Product Category
+
+| Category | Orders | Pre-Shipment Days | Post-Shipment Days |
 |---|---|---|---|
-| RR | 41 | 3.7 | 25.6 |
-| SE | 334 | 3.6 | 18.0 |
-| RN | 474 | 3.6 | 15.7 |
-| MA | 714 | 3.6 | 18.0 |
-| PB | 517 | 3.5 | 16.9 |
+| office_furniture | 1,253 | 10.9 | 10.0 |
+| fashion_shoes | 235 | 5.6 | 9.9 |
+| fashion_male_clothing | 106 | 4.9 | 8.1 |
 
-**Interpretation:** Pre-shipment time is steady across all states (2.8 to 3.7 days), but post-shipment time varies widely, from almost zero to 25.6 days. The slowest states (RR, AP, AM, AL, PA) are all in Brazil's North region, showing that location and logistics infrastructure are the main issues, not seller quality. Note that RR and AP have very few orders (41 and 67), so these specific averages carry more uncertainty than higher-volume states.
+"Office furniture" sellers take **3.4x longer** than the platform average to ship — a genuinely new pattern versus Milestone 1, where seller time was uniform across all regions. It also appears 3 times among the worst state+category "high-delay segments" (CE, BA, PE), confirming it's consistently slow regardless of region — a **category problem**, distinct from AL's **region problem** (which appears 3 times with different categories).
 
-### 6.2 "Bigger Contributor" Classification
+## Key Results — Review Scores
 
-**Result:** Every state classifies as `courier_side_larger`, with no exceptions.
-
-**Interpretation:** This confirms Section 6.1's finding is not an isolated pattern — carrier time dominates seller time consistently across the states where delay is most severe.
-
----
-
-## 7. Analysis — Revenue and On-Time Delivery
-
-### 7.1 Delivered Revenue by State
-
-| State | Total Revenue (R$) | Orders |
+| Review Score | Seller Time (days) | Courier Time (days) |
 |---|---|---|
-| SP | 5,059,138.64 | 40,427 |
-| RJ | 1,757,845.45 | 12,330 |
-| MG | 1,548,587.00 | 11,327 |
-| RS | 726,671.73 | 5,327 |
-| PR | 664,311.94 | 4,912 |
+| 1 ⭐ | 4.7 | 16.6 |
+| 3 ⭐ | 3.6 | 10.7 |
+| 5 ⭐ | 2.9 | 7.8 |
 
-**Interpretation:** São Paulo (SP) makes up roughly 42% of all delivered orders and revenue. Because of this high concentration, SP's delivery performance has a much bigger impact on the overall business than smaller states.
+From 5-star to 1-star, courier time rises **8.8 days** vs. only **1.8 days** for seller time — roughly **5x more movement**. Courier delay is the stronger driver of poor reviews.
 
-### 7.2 On-Time vs. Late Delivery by State (Supporting Metric)
+**Overall bottleneck classification (order level):** 82.1% of orders are courier-driven delays; 17.9% are seller-driven — directly confirming Milestone 1's central finding at the individual-order level.
 
-| State | Orders | % Late |
-|---|---|---|
-| AL | 397 | 23.9% |
-| MA | 714 | 19.7% |
-| PI | 473 | 16.1% |
-| SE | 334 | 15.3% |
-| CE | 1,278 | 15.3% |
+## Milestone 2 Consolidated Findings
 
-**Interpretation:** Alagoas (AL) struggles with both high late-delivery rates and long post-shipment delays, confirming it is a major problem area. Interestingly, Roraima (RR) had the longest post-shipment time (25.6 days), but its late-delivery rate was low (12.2%). This is because Olist gives distant areas longer delivery estimates by default. As a result, relying only on on-time/late rates hides the true delivery cost in remote regions, making raw shipping times a more reliable metric.
+1. A small group of sellers — not the whole seller base — drives most seller-side delay.
+2. Route (South→North), not seller identity, drives the worst regional delays.
+3. Product category adds a new dimension: "office_furniture" is a consistently slow category.
+4. Courier delay is the stronger driver of poor reviews, and is the bigger factor in 82% of all orders.
 
----
+## Milestone 2 Limitations
 
-## 8. Consolidated Findings
+- Seller/category rankings use a minimum order threshold to avoid small-sample bias
+- Review scores may reflect factors unrelated to delivery; findings are associative, not causal
+- Seller-state vs. customer-state comparisons use state pairs as a distance proxy, not exact geography
+- 645 orders (~0.7%) excluded from review-specific analysis only (no matching review)
 
-- Fulfilment delay is overwhelmingly a carrier/logistics issue, not a seller-processing issue. On average, 75% of total fulfilment time (9.3 of 12.6 days) occurs after the order leaves the seller.
-- Seller performance is consistent nationwide (2.8–3.7 days); carrier performance is not. Post-shipment time ranges from near-zero to over 25 days depending on region, with North-region states (RR, AP, AM, AL, PA) most affected.
-- Revenue is heavily concentrated in São Paulo, which generates ~42% of total delivered revenue — meaning fulfilment performance in SP carries outsized business importance.
-- The on-time vs. late metric alone can be misleading in remote regions. Olist's estimated delivery dates already account for distance, so raw post-shipment time is a more honest measure of where delay actually occurs than the on-time/late flag.
-
----
-
-## 9. Limitations
-
-- The dataset spans September 2016 – October 2018 and does not reflect Olist's current operations; this is a demonstration of analytical method on historical, anonymized data rather than a live operational assessment.
-- 188 orders (~0.2%) were excluded due to logically invalid date sequences, likely data-entry anomalies; this is a small proportion and unlikely to materially affect overall conclusions.
-- A small number of extreme outliers (up to ~205 days post-shipment) were retained in average calculations; a future iteration could explore excluding or separately analyzing these.
-- This analysis identifies patterns and associations, not root causes — e.g., a region's high post-shipment time may stem from distance, carrier capacity, or local infrastructure, none of which are directly captured in this dataset.
-- Seller-specific performance and product-category effects are intentionally out of scope for Milestone 1 and will be addressed in Milestone 2.
-
----
-
-## 10. Team Contributions
+## Team Contributions
 
 | Team Member | Role | Key Contributions |
 |---|---|---|
-| Atikaa Abbas | Data Setup & Quality | Loaded and cleaned all three tables; built and refined the `clean_orders` view; identified and resolved a stage-level date-logic issue; produced overall fulfilment metrics |
-| Imtesal Fatima | Regional Delay Analysis | Calculated pre/post-shipment time by state; identified courier-driven vs. seller-driven delay patterns; confirmed findings after data-quality refinement |
-| Maria Noor | Revenue & On-Time Analysis | Calculated delivered revenue by state; calculated on-time/late rates; identified the relationship between raw delay and Olist's estimate-based "on-time" metric |
+| Atikaa Abbas | Data Setup & Seller Analysis | Built/refined `clean_orders`; identified and resolved a stage-level date-logic bug; seller-level and seller-state vs. customer-state analysis |
+| Imtesal Fatima | Regional & Category Analysis | State-wise delay-split analysis (MP1); product-category and high-delay-segment analysis (MP2) |
+| Maria Noor | Revenue, Reviews & Bottleneck Analysis | Revenue and on-time analysis (MP1); review-score and overall bottleneck classification (MP2) |
 
 ---
 
-## Milestone 2 — Seller, Category & Review-Level Analysis
+## Repository Structure
 
-Building on Milestone 1, Milestone 2 dug deeper into which individual sellers, product categories,
-and customer-review patterns drive fulfilment delay.
-
-**Key MP2 Findings:**
-- A small group of sellers — not the whole seller base — drives most seller-side delay (worst seller: 26.2 days vs. 3.2 platform average)
-- Every worst seller-to-customer route involves a South/Southeast seller shipping to a North/Northeast customer, confirming delay is route-based, not seller-quality-based
-- "Office furniture" is a consistently slow category regardless of region
-- Courier delay is ~5x more strongly associated with poor reviews than seller delay (8.8 vs. 1.8 day swing from 5-star to 1-star)
-- Overall, courier delay is the bigger factor in 82.1% of all orders
-
-See `MP2_Report.docx` for full methodology, queries, and findings, and `sql/06` through `sql/09` for the analysis queries.
-
-**Next Steps (Capstone):** Incorporate geolocation-based distance metrics to isolate true distance effects from regional/infrastructure effects — a direction raised during our panel presentation.
+```
+├── README.md (this file)
+├── MP1_Report.docx
+├── MP2_Report.docx
+├── sql/
+│   ├── 01_data_checks.sql
+│   ├── 02_clean_orders_view.sql
+│   ├── 03_overview_analysis.sql
+│   ├── 04_delay_split_analysis.sql
+│   ├── 05_revenue_ontime_analysis.sql
+│   ├── 06_mp2_new_table_checks.sql
+│   ├── 07_mp2_seller_analysis.sql
+│   ├── 08_mp2_category_analysis.sql
+│   └── 09_mp2_review_bottleneck_analysis.sql
+├── docs/
+│   └── data_dictionary.md
+└── visuals/
+    ├── courier_time_by_state.png
+    └── revenue_by_state.png
+```
 
 ---
 
-## 11. Next Steps (Milestone 2 Preview)
+## Next Steps (Capstone)
 
-Milestone 2 will extend this analysis to the seller and product-category level, identifying which individual sellers show the largest pre-shipment delay, whether seller-to-customer distance explains regional patterns, how product category relates to fulfilment time, and how review scores relate to the seller/courier delay split. This maintains the same core theme established in Milestone 1: separating fulfilment time into its component causes rather than treating "delivery time" as a single, undifferentiated number.
+Based on external panel feedback, the Capstone will incorporate **geolocation-based distance data** to calculate actual seller-to-customer distance (via the Haversine formula), separating genuine distance effects from regional infrastructure effects — moving beyond the state-pair proxy used in Milestone 2. Additional next steps: validate patterns against more recent data, and build a formal seller/segment priority-scoring system for operational recommendations.
+
+**A note on scope:** This analysis uses historical (2016–2018), anonymized data, so it demonstrates the diagnostic method rather than producing a live business outcome. It shows associations, not proven causation — findings point to where a business should investigate further (e.g., a targeted A/B test on courier partnerships), not a finished causal proof.
