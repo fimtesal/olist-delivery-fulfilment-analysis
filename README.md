@@ -277,6 +277,24 @@ FROM clean_orders;
 
 ---
 
+## Milestone 2 — Seller, Category & Review-Level Analysis
+
+Building on Milestone 1, Milestone 2 dug deeper into which individual sellers, product categories,
+and customer-review patterns drive fulfilment delay.
+
+**Key MP2 Findings:**
+- A small group of sellers — not the whole seller base — drives most seller-side delay (worst seller: 26.2 days vs. 3.2 platform average)
+- Every worst seller-to-customer route involves a South/Southeast seller shipping to a North/Northeast customer, confirming delay is route-based, not seller-quality-based
+- "Office furniture" is a consistently slow category regardless of region
+- Courier delay is ~5x more strongly associated with poor reviews than seller delay (8.8 vs. 1.8 day swing from 5-star to 1-star)
+- Overall, courier delay is the bigger factor in 82.1% of all orders
+
+See `MP2_Report.docx` for full methodology, queries, and findings, and `sql/06` through `sql/09` for the analysis queries.
+
+**Next Steps (Capstone):** Incorporate geolocation-based distance metrics to isolate true distance effects from regional/infrastructure effects — a direction raised during our panel presentation.
+
+---
+
 ## 11. Next Steps (Milestone 2 Preview)
 
 Milestone 2 will extend this analysis to the seller and product-category level, identifying which individual sellers show the largest pre-shipment delay, whether seller-to-customer distance explains regional patterns, how product category relates to fulfilment time, and how review scores relate to the seller/courier delay split. This maintains the same core theme established in Milestone 1: separating fulfilment time into its component causes rather than treating "delivery time" as a single, undifferentiated number.
